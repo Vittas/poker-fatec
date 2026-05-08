@@ -5,4 +5,6 @@ type Message struct {
     Name   string `json:"name,omitempty"`
     Action string `json:"action,omitempty"`
     Amount int    `json:"amount,omitempty"`
+    Start  bool   `json:"start,omitempty"`
+    Message string `json:"message,omitempty"`
 }

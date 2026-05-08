@@ -48,8 +48,15 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
         "player": player.Name,
     })
 
-    if len(room.Players) >= 2 {
-        room.StartGame()
+    // send existing chat history to the newly joined player
+    history := room.GetChatHistory()
+    player.Conn.WriteJSON(map[string]interface{}{
+        "type": "CHAT_HISTORY",
+        "messages": history.Messages,
+    })
+
+    if joinMsg.Start && len(room.Players) >= 2 {
+        room.StartGame(joinMsg)
     }
 
     for {
@@ -68,7 +75,27 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
         if msg.Type == "ACTION" {
             room.HandleAction(player, msg)
         }
+
+        if msg.Type == "START" && msg.Start && len(room.Players) >= 2 {
+            room.StartGame(msg)
+        }
+
+        if msg.Type == "CHAT" && msg.Message != "" {
+            chat := game.ChatMessage{
+                Sender:  player.Name,
+                Message: msg.Message,
+            }
+
+            room.AddChatMessage(chat)
+
+            room.Broadcast(map[string]interface{}{
+                "type":    "CHAT",
+                "sender":  chat.Sender,
+                "message": chat.Message,
+            })
+        }
     }
+
 
     conn.Close()
 }

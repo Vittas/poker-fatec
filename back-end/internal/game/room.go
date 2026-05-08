@@ -7,11 +7,13 @@ import (
 type Room struct {
     ID         string
     Players    []*Player
+    Start      bool
     Deck       []Card
     Community  []Card
     Pot        int
     Turn       int
     Mutex      sync.Mutex
+    History    ChatHistory
 }
 
 var Rooms = map[string]*Room{}
@@ -24,6 +26,7 @@ func CreateRoom(id string) *Room {
         Community: []Card{},
         Pot:       0,
         Turn:      0,
+        History:   ChatHistory{},
     }
 
     Rooms[id] = room
@@ -54,12 +57,13 @@ func (r *Room) Broadcast(data interface{}) {
     }
 }
 
-func (r *Room) StartGame() {
-    if len(r.Players) < 2 {
+func (r *Room) StartGame(msg Message) {
+    if len(r.Players) < 2 && !msg.Start {
         return
     }
 
     r.Deck = NewDeck()
+    r.Turn = 0
 
     for _, player := range r.Players {
         player.Cards = []Card{
@@ -110,6 +114,14 @@ func (r *Room) HandleAction(player *Player, msg Message) {
     r.Mutex.Lock()
     defer r.Mutex.Unlock()
 
+    if len(r.Players) < 2 {
+        return
+    }
+
+    if len(r.Players) == 0 || r.Players[r.Turn] != player {
+        return
+    }
+
     switch msg.Action {
     case "FOLD":
         player.Folded = true
@@ -132,4 +144,12 @@ func (r *Room) HandleAction(player *Player, msg Message) {
     })
 
     r.NextTurn()
+}
+
+func (r *Room) GetChatHistory() ChatHistory {
+    return r.History
+}
+
+func (r *Room) AddChatMessage(msg ChatMessage) {
+    r.History.Messages = append(r.History.Messages, msg)
 }
