@@ -1,19 +1,21 @@
 package main
 
 import (
-    "fmt"
-    "net/http"
+	"fmt"
+	"net/http"
 
-    "poker-fatec/internal/ws"
+	"poker-fatec/internal/ws"
 )
 
 func main() {
-    http.HandleFunc("/ws/", ws.HandleWebSocket)
+	http.HandleFunc("/ws/players/", ws.ListPlayersInRoom)
+	http.HandleFunc("/ws/player/", ws.GetPlayerPosition)
+	http.HandleFunc("/ws/", ws.HandleWebSocket)
 
-    fmt.Println("Servidor iniciado na porta 8080")
+	fmt.Println("Servidor iniciado na porta 8080")
 
-    err := http.ListenAndServe(":8080", nil)
-    if err != nil {
-        panic(err)
-    }
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		panic(err)
+	}
 }

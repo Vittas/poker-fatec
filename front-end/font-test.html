@@ -399,7 +399,13 @@
             <div class="table-center">
               <div id="tableInfo">Aguardando jogadores...</div>
               <div id="potInfo" style="margin-top: 10px; font-size: 1rem;">Pote: R$ 0</div>
+              <div id="communityCards" style="margin-top: 10px; font-size: 0.95rem;"></div>
             </div>
+          </div>
+
+          <div id="playersBox" style="margin-top: 15px; background: rgba(0, 0, 0, 0.3); padding: 12px; border-radius: 10px;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Jogadores</div>
+            <div id="playersList">Nenhum jogador</div>
           </div>
 
           <div class="action-buttons">
@@ -411,6 +417,12 @@
             </button>
             <button class="btn btn-primary action-btn" onclick="raiseBet()">
               <span>↑</span> RAISE (R$ 100)
+            </button>
+            <button class="btn btn-secondary action-btn" onclick="nextRound()">
+              <span>⏭️</span> Passar Rodada
+            </button>
+            <button class="btn btn-secondary action-btn" onclick="kickInactive()">
+              <span>🧹</span> Remover Inativos
             </button>
           </div>
         </div>
@@ -448,7 +460,7 @@
   <script>
     let socket
     let playerName = ""
-    let serverurl = "paper-favourite-boutique-silly.trycloudflare.com"
+    let serverurl = "localhost:8080"
     let roomId = "test-room"
 
     function log(message) {
@@ -491,66 +503,133 @@
 
     function connect() {
       playerName = document.getElementById("name").value.trim()
-      
       if (!playerName) {
         alert("Por favor, digite seu nome antes de entrar.")
         return
       }
 
-      socket = new WebSocket("ws://"+serverurl+"/ws/"+roomId)
-
-      socket.onopen = () => {
-        log("Conectado ao servidor")
-        updateStatus(true)
-        
-        socket.send(JSON.stringify({
-          type: "JOIN",
-          name: playerName
-        }))
-        
-        addChatMessage("Sistema", `Você entrou na sala como ${playerName}`, "self")
-      }
-
-      socket.onmessage = (event) => {
-        try {
-          const obj = JSON.parse(event.data)
-
-          if (obj.type === "CHAT") {
-            const isSelf = obj.sender === playerName
-            addChatMessage(obj.sender, obj.message, isSelf ? "self" : "other")
+      // roomId = getRoomIdFromUrl() 
+      fetch(`http://${serverurl}/ws/players/${roomId}`)
+        .then(res => res.json())
+        .then(players => {
+          if (Array.isArray(players) && players.some(p => p.name === playerName)) {
+            alert("Esse nome ja esta conectado na sala.")
             return
           }
 
-          if (obj.type === "CHAT_HISTORY") {
-            obj.messages.forEach(m => {
-              const isSelf = m.sender === playerName
-              addChatMessage(m.sender, m.message, isSelf ? "self" : "other")
-            })
-            return
+          socket = new WebSocket("ws://"+serverurl+"/ws/"+roomId)
+
+          socket.onopen = () => {
+            log("Conectado ao servidor")
+            updateStatus(true)
+            
+            socket.send(JSON.stringify({
+              type: "JOIN",
+              name: playerName
+            }))
+            
+            addChatMessage("Sistema", `Você entrou na sala como ${playerName}`, "self")
           }
-          
-          // Atualizar informações da mesa
-          if (obj.type === "GAME_UPDATE") {
-            updateTableInfo(obj)
-            return
+
+          socket.onmessage = (event) => {
+            try {
+              const obj = JSON.parse(event.data)
+
+              if (obj.type === "PLAYER_JOINED") {
+                addChatMessage("Sistema", `${obj.player} entrou na sala (${obj.position})`, "system")
+                refreshPlayers()
+                return
+              }
+
+              if (obj.type === "CHAT") {
+                const isSelf = obj.sender === playerName
+                addChatMessage(obj.sender, obj.message, isSelf ? "self" : "other")
+                return
+              }
+
+              if (obj.type === "CHAT_HISTORY") {
+                obj.messages.forEach(m => {
+                  const isSelf = m.sender === playerName
+                  addChatMessage(m.sender, m.message, isSelf ? "self" : "other")
+                })
+                return
+              }
+
+              if (obj.type === "ROUND_ADVANCED") {
+                updateCommunityCards(obj.community || [])
+                updateTableInfo({
+                  state: "PLAYING",
+                  round: obj.round,
+                  pot: obj.pot
+                })
+                return
+              }
+
+              if (obj.type === "HAND_FINISHED") {
+                addChatMessage("Sistema", `Vencedor: ${obj.winner} (Pote: R$ ${obj.pot})`, "system")
+                return
+              }
+
+              if (obj.type === "POSITIONS_UPDATED") {
+                refreshPlayers()
+                return
+              }
+
+              if (obj.type === "PLAYERS_REMOVED") {
+                addChatMessage("Sistema", `Removidos: ${obj.players.join(', ')}`, "system")
+                refreshPlayers()
+                return
+              }
+
+              if (obj.type === "TURN") {
+                updateTableInfo({
+                  state: "PLAYING",
+                  currentPlayer: obj.player
+                })
+                return
+              }
+
+              if (obj.type === "PLAYER_ACTION") {
+                updateTableInfo({
+                  state: "PLAYING",
+                  pot: obj.pot
+                })
+                log(`${obj.player} => ${obj.action} (${obj.amount || 0})`)
+                return
+              }
+
+              if (obj.type === "CHIPS_TRANSFERRED") {
+                log(`${obj.from} transferiu R$ ${obj.amount} para ${obj.to}`)
+                refreshPlayers()
+                return
+              }
+              
+              // Atualizar informações da mesa
+              if (obj.type === "GAME_UPDATE") {
+                updateTableInfo(obj)
+                return
+              }
+            } catch (e) {
+              // not JSON or unexpected shape, fall through
+            }
+
+            log(event.data)
           }
-        } catch (e) {
-          // not JSON or unexpected shape, fall through
-        }
 
-        log(event.data)
-      }
+          socket.onclose = () => {
+            log("Desconectado do servidor")
+            updateStatus(false)
+            addChatMessage("Sistema", "Você foi desconectado da sala", "system")
+          }
 
-      socket.onclose = () => {
-        log("Desconectado do servidor")
-        updateStatus(false)
-        addChatMessage("Sistema", "Você foi desconectado da sala", "system")
-      }
-
-      socket.onerror = (error) => {
-        log("Erro na conexão: " + error)
-        addChatMessage("Sistema", "Erro na conexão com o servidor", "system")
-      }
+          socket.onerror = (error) => {
+            log("Erro na conexão: " + error)
+            addChatMessage("Sistema", "Erro na conexão com o servidor", "system")
+          }
+        })
+        .catch(() => {
+          alert("Nao foi possivel verificar jogadores na sala.")
+        })
     }
 
     function start() {
@@ -613,6 +692,33 @@
       log("Aumento de aposta enviado: R$ 100")
     }
 
+    function nextRound() {
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        alert("Você precisa estar conectado primeiro!")
+        return
+      }
+
+      socket.send(JSON.stringify({
+        type: "NEXT_ROUND"
+      }))
+
+      log("Pedido para passar a rodada enviado")
+    }
+
+    function kickInactive() {
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        alert("Você precisa estar conectado primeiro!")
+        return
+      }
+
+      socket.send(JSON.stringify({
+        type: "KICK_INACTIVE",
+        inactiveSeconds: 120
+      }))
+
+      log("Pedido para remover inativos enviado")
+    }
+
     function handleChatKeyPress(event) {
       if (event.key === 'Enter') {
         sendChat()
@@ -632,9 +738,54 @@
         tableInfo.textContent = "Aguardando jogadores..."
         potInfo.textContent = "Pote: R$ 0"
       } else if (gameData.state === "PLAYING") {
-        tableInfo.textContent = `Rodada: ${gameData.round || "Pré-flop"} | Jogadores: ${gameData.players || 0}`
-        potInfo.textContent = `Pote: R$ ${gameData.pot || 0}`
+        const roundLabel = gameData.round ? `Rodada: ${gameData.round}` : "Rodada: Pré-flop"
+        const turnLabel = gameData.currentPlayer ? ` | Turno: ${gameData.currentPlayer}` : ""
+        tableInfo.textContent = `${roundLabel}${turnLabel}`
+        if (typeof gameData.pot !== "undefined") {
+          potInfo.textContent = `Pote: R$ ${gameData.pot}`
+        }
       }
+    }
+
+    function updateCommunityCards(cards) {
+      const container = document.getElementById("communityCards")
+      if (!cards.length) {
+        container.textContent = ""
+        return
+      }
+
+      const labels = cards.map(c => `${c.rank} de ${c.suit}`)
+      container.textContent = `Comunitarias: ${labels.join(' | ')}`
+    }
+
+    // function getRoomIdFromUrl() {
+    //   const params = new URLSearchParams(window.location.search)
+    //  const queryRoom = params.get("room")
+    //   if (queryRoom) return queryRoom
+     
+    //   const parts = window.location.pathname.split('/').filter(Boolean)
+    //   if (parts.length > 0) {
+    //     return parts[parts.length - 1]
+    //   }
+     
+    //   return roomId
+    // }
+
+    function refreshPlayers() {
+      const list = document.getElementById("playersList")
+      fetch(`http://${serverurl}/ws/players/${roomId}`)
+        .then(res => res.json())
+        .then(players => {
+          if (!Array.isArray(players) || players.length === 0) {
+            list.textContent = "Nenhum jogador"
+            return
+          }
+
+          list.innerHTML = players.map(p => `${p.name} - ${p.position}`).join("<br>")
+        })
+        .catch(() => {
+          list.textContent = "Erro ao carregar jogadores"
+        })
     }
 
     // Inicialização

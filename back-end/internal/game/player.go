@@ -1,11 +1,17 @@
 package game
 
-import "github.com/gorilla/websocket"
+import (
+	"time"
+
+	"github.com/gorilla/websocket"
+)
 
 type Player struct {
-    Name   string
-    Conn   *websocket.Conn
-    Chips  int
-    Cards  []Card
-    Folded bool
+	Name       string
+	Conn       *websocket.Conn
+	Chips      int
+	Cards      []Card
+	Folded     bool
+	Position   string
+	LastActive time.Time
 }
