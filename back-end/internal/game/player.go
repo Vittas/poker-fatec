@@ -12,6 +12,9 @@ type Player struct {
 	Chips      int
 	Cards      []Card
 	Folded     bool
+	AllIn      bool
+	BetInRound int
+	TotalBet   int
 	Position   string
 	LastActive time.Time
 }
