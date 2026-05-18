@@ -96,8 +96,5 @@ Notes
 - Round progression: 2 = flop (3 cards), 3 = turn (1 card), 4 = river (1 card), then hand ends.
 
 erros:
-        - fold não funciona
         - fichas do jogador não são alteradas
         - jogo não começa pelo small blind
-        - call em caso de ter tido raise não funciona 
-        - não tem opção de check

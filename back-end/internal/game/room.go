@@ -14,6 +14,7 @@ type Room struct {
 	Pot            int
 	Round          int
 	DealerIndex    int
+	InitialDealerIndex int
 	Turn           int
 	SmallBlind     int
 	BigBlind       int
@@ -40,6 +41,7 @@ func CreateRoom(id string) *Room {
 		Pot:            0,
 		Round:          0,
 		DealerIndex:    0,
+		InitialDealerIndex: 0,
 		Turn:           0,
 		SmallBlind:     100,
 		BigBlind:       200,
@@ -153,6 +155,7 @@ func (r *Room) StartGame(msg Message) {
 	r.Turn = 0
 	r.Community = []Card{}
 	r.Pot = 0
+	r.InitialDealerIndex = r.DealerIndex
 	r.CurrentBet = 0
 	r.MinRaise = r.BigBlind
 	r.PendingActions = 0
@@ -255,6 +258,10 @@ func (r *Room) rotateDealer() {
 	}
 
 	r.DealerIndex = (r.DealerIndex + 1) % len(r.Players)
+	if r.DealerIndex == r.InitialDealerIndex {
+		r.SmallBlind = r.raiseBlind(r.SmallBlind)
+		r.BigBlind = r.SmallBlind * 2
+	}
 	r.AssignPositions()
 
 	r.Broadcast(map[string]interface{}{
@@ -405,6 +412,7 @@ func (r *Room) HandleAction(player *Player, msg Message) {
 
 	acted := false
 	raised := false
+	actionAmount := msg.Amount
 
 	switch msg.Action {
 	case "FOLD":
@@ -417,33 +425,40 @@ func (r *Room) HandleAction(player *Player, msg Message) {
 		}
 
 	case "CALL":
+		if r.CurrentBet == 0 {
+			if msg.Amount <= 0 {
+				acted = true
+				actionAmount = 0
+				break
+			}
+			betAmount := r.minInt(player.Chips, msg.Amount)
+			if betAmount <= 0 {
+				break
+			}
+			r.recordBetLocked(player, betAmount)
+			if betAmount < msg.Amount || player.Chips == 0 {
+				player.AllIn = player.Chips == 0
+			}
+			r.CurrentBet = player.BetInRound
+			r.MinRaise = betAmount
+			raised = true
+			actionAmount = betAmount
+			acted = true
+			break
+		}
+
 		if toCall == 0 {
 			acted = true
+			actionAmount = 0
 			break
 		}
 
 		callAmount := r.minInt(player.Chips, toCall)
 		r.recordBetLocked(player, callAmount)
-		if callAmount < toCall {
-			player.AllIn = true
-		}
-		acted = true
-
-	case "BET":
-		if r.CurrentBet != 0 {
-			break
-		}
-		betAmount := r.minInt(player.Chips, msg.Amount)
-		if betAmount <= 0 {
-			break
-		}
-		r.recordBetLocked(player, betAmount)
-		if betAmount < msg.Amount || player.Chips == 0 {
+		if callAmount < toCall || player.Chips == 0 {
 			player.AllIn = player.Chips == 0
 		}
-		r.CurrentBet = player.BetInRound
-		r.MinRaise = betAmount
-		raised = true
+		actionAmount = callAmount
 		acted = true
 
 	case "RAISE":
@@ -464,6 +479,7 @@ func (r *Room) HandleAction(player *Player, msg Message) {
 			r.MinRaise = raiseBy
 			raised = true
 		}
+		actionAmount = raiseAmount
 		acted = true
 
 	case "ALL_IN":
@@ -481,6 +497,7 @@ func (r *Room) HandleAction(player *Player, msg Message) {
 				raised = true
 			}
 		}
+		actionAmount = allInAmount
 		acted = true
 	}
 
@@ -492,7 +509,7 @@ func (r *Room) HandleAction(player *Player, msg Message) {
 		"type":   "PLAYER_ACTION",
 		"player": player.Name,
 		"action": msg.Action,
-		"amount": msg.Amount,
+		"amount": actionAmount,
 		"pot":    r.Pot,
 	})
 
@@ -700,18 +717,47 @@ func (r *Room) buildSidePotsLocked() []SidePot {
 		}
 		prev = level
 	}
-
+	
 	return pots
 }
 
+func (r *Room) RemovePlayer(name string) bool {
+	for i, p := range r.Players {
+		if p.Name == name {
+			r.Players = append(r.Players[:i], r.Players[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Room) findWinnerAmong(players []*Player) *Player {
+	var bestPlayer *Player
+	var bestHand Hand
+	first := true
+
 	for _, player := range players {
-		if !player.Folded {
-			return player
+		if player.Folded {
+			continue
+		}
+		if len(r.Community) < 5 {
+			if bestPlayer == nil {
+				bestPlayer = player
+			}
+			continue
+		}
+
+		cards := append([]Card{}, r.Community...)
+		cards = append(cards, player.Cards...)
+		hand := EvaluateBestHand(cards)
+		if first || CompareHands(hand, bestHand) > 0 {
+			bestPlayer = player
+			bestHand = hand
+			first = false
 		}
 	}
 
-	return nil
+	return bestPlayer
 }
 
 func (r *Room) uniqueSorted(values []int) []int {
@@ -740,6 +786,14 @@ func (r *Room) minInt(a int, b int) int {
 		return a
 	}
 	return b
+}
+
+func (r *Room) raiseBlind(amount int) int {
+	if amount <= 0 {
+		return amount
+	}
+
+	return (amount*3 + 1) / 2
 }
 
 func (r *Room) GetChatHistory() ChatHistory {

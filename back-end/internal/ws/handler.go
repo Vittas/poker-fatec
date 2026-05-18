@@ -261,3 +261,31 @@ func GetPlayerChips(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNotFound)
 }
+
+func KickPlayer(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/ws/kick/player/")
+	parts := strings.SplitN(path, "/", 4)
+	if len(parts) < 4 || parts[0] == "" || parts[1] == "" || parts[2] != "target" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	roomID := parts[0]
+	name, err := url.PathUnescape(parts[1])
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	room := game.GetRoom(roomID)
+
+	if room.RemovePlayer(name) {
+		room.Broadcast(map[string]interface{}{
+			"type":   "PLAYER_KICKED",
+			"player": name,
+		})
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
